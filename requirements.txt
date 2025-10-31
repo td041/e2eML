@@ -1,0 +1,19 @@
+# Database / Postgres client
+psycopg2-binary
+
+# ETL / MinIO / Data Processing
+minio
+kaggle
+pandas
+numpy
+
+# Utilities & helpers
+pendulum
+requests
+python-dotenv
+
+# Machine Learning (optional, cho bước sau)
+matplotlib
+seaborn
+scikit-learn
+

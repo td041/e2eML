@@ -1,0 +1,125 @@
+x-airflow-common: &airflow-common
+  image: apache/airflow:2.9.2
+  env_file: ./.env
+  user: "${AIRFLOW_UID:-50000}:0"
+  environment: &airflow-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "True"
+    PYTHONWARNINGS: "ignore::SyntaxWarning"
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags
+    - ./airflow/logs:/opt/airflow/logs
+    - ./airflow/plugins:/opt/airflow/plugins
+    - ./.kaggle:/home/airflow/.kaggle:ro
+    - ./requirements.txt:/opt/airflow/requirements.txt
+    - airflow_data:/opt/airflow/data
+
+services:
+  minio:
+    image: minio/minio
+    ports:
+      - "9002:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio123
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+
+  minio-init:
+    image: minio/mc
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint: >
+      /bin/sh -c "
+        # wait until MinIO is reachable, then configure alias and create bucket/folders
+        until mc --insecure alias set myminio http://minio:9000 minio minio123 2>/dev/null; do sleep 1; done;
+        mc --insecure mb --ignore-existing myminio/off;
+        printf '' > /tmp/.keep;
+        for layer in raw silver gold models; do
+          mc --insecure cp /tmp/.keep myminio/off/$${layer}/.keep || true;
+        done;
+        echo 'minio init complete';
+        "
+    restart: "no"
+
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  init:
+    <<: *airflow-common
+    container_name: airflow_init
+    user: "0:0"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: >
+      bash -c "
+        mkdir -p /opt/airflow/logs /opt/airflow/dags /opt/airflow/plugins &&
+        chown -R ${AIRFLOW_UID:-50000}:0 /opt/airflow/logs /opt/airflow/dags /opt/airflow/plugins &&
+        if [ -f /opt/airflow/requirements.txt ]; then
+          su -s /bin/bash airflow -c 'pip install -r /opt/airflow/requirements.txt';
+        else
+          echo 'No requirements.txt found, skipping pip install';
+        fi &&
+        su -s /bin/bash airflow -c 'airflow db upgrade' &&
+        su -s /bin/bash airflow -c 'airflow users create --username admin --password admin --firstname Anonymous --lastname Admin --role Admin --email admin@example.org'
+      "
+
+  webserver:
+    <<: *airflow-common
+    container_name: airflow_webserver
+    restart: always
+    ports:
+      - "8080:8080"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    command: >
+      bash -c "
+        if [ -f /opt/airflow/requirements.txt ]; then
+          pip install -r /opt/airflow/requirements.txt;
+        else
+          echo 'No requirements.txt found, skipping pip install';
+        fi &&
+        exec airflow webserver
+      "
+
+  scheduler:
+    <<: *airflow-common
+    container_name: airflow_scheduler
+    restart: always
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    command: >
+      bash -c "
+        if [ -f /opt/airflow/requirements.txt ]; then
+          pip install -r /opt/airflow/requirements.txt;
+        else
+          echo 'No requirements.txt found, skipping pip install';
+        fi &&
+        exec airflow scheduler
+      "
+
+volumes:
+  minio_data:
+  postgres_data:
+  airflow_data:
