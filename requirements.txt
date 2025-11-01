@@ -11,6 +11,8 @@ numpy
 pendulum
 requests
 python-dotenv
+jupyterlab 
+ipykernel
 
 # Machine Learning (optional, cho bước sau)
 matplotlib

@@ -36,40 +36,6 @@ RAW_PATH = os.getenv("RAW_PATH")
 SILVER_PATH = os.getenv("SILVER_PATH")
 GOLD_PATH = os.getenv("GOLD_PATH")
 
-
-def _parse_s3_uri(uri: str | None) -> tuple[str | None, str | None]:
-    """Return (bucket, key_prefix) for S3-style URIs or bare key strings."""
-    if not uri:
-        return None, None
-    raw = uri.strip()
-    if not raw:
-        return None, None
-    if "://" in raw:
-        scheme, remainder = raw.split("://", 1)
-        if scheme.lower() != "s3":
-            raise ValueError(f"Unsupported URI scheme: {uri!r}")
-    else:
-        remainder = raw
-    parts = [part for part in remainder.split("/") if part]
-    if not parts:
-        return None, None
-    bucket = parts[0]
-    prefix = "/".join(parts[1:]) if len(parts) > 1 else None
-    return bucket, prefix
-
-
-def _join_keys(*segments: str | os.PathLike[str] | None) -> str:
-    """Join path segments with '/', skipping empty or None segments."""
-    cleaned: list[str] = []
-    for segment in segments:
-        if segment is None:
-            continue
-        value = os.fspath(segment).strip("/")
-        if value:
-            cleaned.append(value)
-    return "/".join(cleaned)
-
-
 # Default arguments shared by all tasks
 default_args = {
     "owner": "ml-team",
@@ -77,7 +43,6 @@ default_args = {
     "retries": 1,
     "retry_delay": timedelta(minutes=5),
 }
-
 
 @dag(
     dag_id="e2eml_pipeline",
